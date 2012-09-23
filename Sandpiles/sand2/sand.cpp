@@ -1,0 +1,158 @@
+#include <reedGPU.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <limits.h>
+#include <math.h>
+#define PPM_RES 30
+#define LOCAL_WORK_SIZE 128
+// Source file needs to be a text file, with the following parameters:
+//<Columns> <Rows> 
+//[Number of grains at each position, including the zero grains. Do not include the sink. This program assumes that the sink surrounds the rectangle. If you want sinks inside the rectangle, give a INT_MIN value for the sand grains]
+int* file_extractor(char *file_name, int &h, int &v){
+  FILE *file;
+  file = fopen(file_name, "r");
+  int z = 0;
+  int x;
+  fscanf(file, "%d", &h);
+  fscanf(file, "%d", &v);
+  h += 2;
+  v += 2;
+  int n = h*v;
+  int* s = (int*)malloc(n*sizeof(int));
+  while(fscanf(file,"%d",&x) != EOF){
+    s[z]=x;
+    z++;
+  }
+  fclose(file);
+  return(s);
+
+}
+char* rgbDet(int s, int res){
+  int r, g, b;
+  b = s%res;
+  s /= res;
+  g = s%res;
+  s /= res;
+  r = s%res;
+  char* fs =(char*)malloc(32*sizeof(char));
+  sprintf(fs, "%d %d %d   ",r,g,b);
+  return(fs);
+}
+void ppm(int* src, int h, int v, int n, int r, char* s){
+  FILE* fp;
+  char* fn = (char*)malloc(500);
+  int res = PPM_RES;
+  sprintf(fn,"/home/gpu/vgopalas/sand2/PPMOut/%s%06d.ppm",s,r);
+  fp = fopen(fn, "w");
+  if(fp ==NULL){
+    printf("failure");
+    exit(-1);
+      }
+  fprintf(fp,"P3\n%d %d\n%d",h,v, res);
+  for(int i =0;i<n;i++){
+    char* fsn =(char*)malloc(30*sizeof(char));
+    if(i%60 == 0){
+      fprintf(fp,"\n");
+    }
+    if(src[i]==0){
+      fprintf(fp,"0 0 0   ");
+    }
+    else{ if(src[i]==1){
+	sprintf(fsn,"%d 0 0   ",res);
+	fprintf(fp,fsn);
+      }
+      else{ if(src[i]==2){
+	  sprintf(fsn,"0 %d 0   ",res);
+	  fprintf(fp,fsn);
+	}
+	else{ if(src[i]==3){
+	    sprintf(fsn,"0 0 %d   ",res);
+
+	    fprintf(fp, fsn);
+	  }
+	  else{
+	    if(src[i] < 0){
+	      sprintf(fsn,"%d %d %d   ",res, res, res);
+
+	  fprintf(fp,fsn);
+	  }
+	    else{ char * fs = rgbDet(src[i],res);
+	      fprintf(fp,fs);
+	    }
+	  }
+	}
+	  
+      }}}
+  fclose(fp);
+}
+	
+int main(int argc, char **argv){
+
+  if (argc < 3){
+    printf("Usage: %s <Reps> <Source File> ", argv[0]);
+    exit(-1);
+  }
+
+  long time = 0;
+  int reps = atoi(argv[1]);
+  printf("%d",reps);
+  int graph_h;
+  int graph_v;
+  int* sand_i = file_extractor(argv[2],graph_h,graph_v);
+  int graph_n = graph_h * graph_v;
+  rGcontext context;
+  rGinit(&context);
+  rGload(&context,"sand.cl");
+  
+  rGmem dev_src;
+  rGmem dev_dst;
+  rGmem dev_min;
+  rGmem dev_max;
+
+  int *min_val = (int*)rGmalloc(&context, "W", LOCAL_WORK_SIZE*sizeof(cl_int),&dev_min);
+  int *max_val = (int*)rGmalloc(&context, "W", LOCAL_WORK_SIZE*sizeof(cl_int), &dev_max);
+  int *graph_src = (int *)rGmalloc(&context, "I", sizeof(cl_int)*graph_n,&dev_src);
+  int *graph_dst = (int *)rGmalloc(&context, "O", sizeof(cl_int)*graph_n,&dev_dst);
+  int si = 0;
+  for(int u = 0; u <graph_n;u++){
+    if(u <= graph_h||u%graph_h ==0 || (u+1)%graph_h ==0 || u>(graph_n-graph_h)){
+      graph_src[u]= -1;
+    }
+    else{
+    graph_src[u]=sand_i[si];
+    si++;
+    }
+    if(u < LOCAL_WORK_SIZE){
+      max_val[u]=0;
+      min_val[u]=0;
+    }
+  }
+ 
+  for(int j = 0; j<reps; j++){
+    printf("%d\n",j);
+    ppm(graph_src,graph_h,graph_v,graph_n,j,argv[0]);
+  rGinitX(&context);
+
+
+  rGnewX(&context,"run");
+  rGargXmem(&context,dev_src);
+  rGargXmem(&context,dev_dst);
+  rGargXint(&context,graph_v);
+  rGargXint(&context,graph_h);
+  rGargXint(&context,dev_min);
+  rGargXint(&context,dev_max);
+
+  rGXid x = rGsubmitX(&context,(max_val[0]-min_val[0]+1),(atoi(argv[4])*atoi(argv[5])));
+  rGwaitallX(&context);
+  time += rGgettimeX(&context,x);
+  for(int z = 0;z < graph_n;z++){
+    graph_src[z]=graph_dst[z];
+  }
+  
+  }
+  ppm(graph_src,graph_h,graph_v,graph_n,reps,argv[0]);
+ 
+  printf("%s \t%lu\n",argv[0],time);
+
+}

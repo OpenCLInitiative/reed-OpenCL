@@ -1,0 +1,106 @@
+#include <reedGPU.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+int* file_extractor(char *file_name){
+  FILE *file;
+  file = fopen(file_name,"rb");
+  if(file == NULL){
+    printf("Failure");
+  }
+  fseek(file,0,SEEK_END);
+  int sz = ftell(file);
+  printf("%d\n",sz);
+  int* s = (int*)malloc(sz);
+  for(int z = 0; z<(sz/sizeof(int)); z++){
+    fscanf(file, "%d", &s[z]);
+    printf("%d",s[z]);
+  }
+  return(s);
+
+}    
+int* cmd_extractor(char **argv, int n){
+ int* s = (int*) malloc(n*sizeof(int));
+  for(int i = 0; i < n; i+=2){
+    s[i] = atoi(argv[i+5]);
+    s[i+1] = atoi(argv[i+6]);
+  }
+  return(s);
+}
+
+int* seed(int* var, int* dst, int n){
+  for(int i =0; i < n; i+= 2){
+    dst[i] = 0;
+    dst[i+1] = 0;
+    dst[var[i+1]]=var[i];
+  }
+  return(dst);
+}
+  
+int main(int argc, char **argv){
+
+  if (argc < 5){
+    printf("Usage: %s <Length> <Width> <Reps> <Input mode: f for file, c for command line>  [Sand Grains, Position]/[*.txt] ", argv[0]);
+    exit(-1);
+  }
+
+  int graph_v = atoi(argv[1]);
+  int graph_h = atoi(argv[2]);
+  int graph_n = graph_v * graph_h;
+  long time = 0;
+  int reps = atoi(argv[3]);
+  int arg_n = (argc-5);
+  int* sand_i;
+  if (argv[4][0]== 'c'){
+  sand_i = cmd_extractor(argv,arg_n);
+  }
+  if (argv[4][0]=='f'){
+  sand_i = file_extractor(argv[5]);
+  }
+
+
+  rGcontext context;
+  rGinit(&context);
+  rGload(&context,"sand.cl");
+  
+  rGmem dev_src;
+  rGmem dev_dst;
+
+  int *graph_src = (int *)rGmalloc(&context, "I", sizeof(cl_int)*graph_n,&dev_src);
+  int *graph_dst = (int *)rGmalloc(&context, "O", sizeof(cl_int)*graph_n,&dev_dst);
+  for(int q=0;q<graph_n;q++){
+    graph_src[q]=0;
+  }
+  for(int p =0; p < arg_n; p+= 2){
+    graph_src[sand_i[p+1]]=sand_i[p];
+  }
+
+  for(int j = 0; j<reps; j++){
+ 
+    
+  for(int k = 0; k<graph_n;k++){
+    if(k%graph_h == 0){printf("\n");}
+    printf("%d  ",graph_src[k]);
+  }
+
+  rGinitX(&context);
+  printf("\n");
+
+  rGnewX(&context,"run");
+  rGargXmem(&context,dev_src);
+  rGargXmem(&context,dev_dst);
+  rGargXint(&context,graph_v);
+  rGargXint(&context,graph_h);
+  
+  rGXid x = rGsubmitX(&context,graph_n,16);
+
+  rGwaitallX(&context);
+  
+  time += rGgettimeX(&context,x);
+  for(int z = 0;z < graph_n;z++){
+    graph_src[z]=graph_dst[z];
+  }
+  }
+
+  printf("%s \t%lu\n",argv[0],time);
+}

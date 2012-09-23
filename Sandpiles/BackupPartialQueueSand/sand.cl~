@@ -1,0 +1,202 @@
+typedef struct {
+       int ping;
+       int add;
+} container;
+typedef struct{
+	int up;
+	int down;
+	int left;
+	int right;
+	int val;
+}sand;
+
+int pos(int i, int j, int h){
+    int s = i+ j*h;
+    return(s);
+}
+int up(int p, int v){
+    int s = p - v;
+    return(s);
+}
+int down(int p, int v){
+    int s = p +v;
+    return(s);
+}
+int left(int p, int v){
+    int s = p - 1;
+ return(s);
+}
+int right(int p, int v){
+    int s = p + 1;
+    return(s);
+}
+int check(__local container* rowFlag, __local container* cellFlag, int ly, int lpos, int row_flag, int add_flag){
+    if(row_flag){
+	if(add_flag){
+		if(rowFlag[ly].add){
+			rowFlag[ly].add=0;
+			return(1);
+		}
+		else{ return(0); }
+		}
+	else{
+		if(rowFlag[ly].ping){
+                        rowFlag[ly].ping=0;
+                        return(1);
+                }
+                else{ return(0); }
+
+    	}
+    }
+    else{
+	if(add_flag){
+                if(cellFlag[lpos].add){
+                        cellFlag[lpos].add=0;
+                        return(1);
+                }
+                else{ return(0); }
+     		}
+        else{
+                if(cellFlag[lpos].ping){
+                        cellFlag[lpos].ping=0;
+                        return(1);
+                }
+                else{ return(0); }
+		}
+		}
+}
+void ping_update_add(__global sand* s,int ngpos, int nlpos,int ly, int lsy, int nlx, int lsx,__local container* rowFlag, __local container* cellFlag, int h){
+     if(s[ngpos].val >3){
+     		    s[up(ngpos,h)].down = 1;
+		    if(ly>0){
+		    rowFlag[ly-1].add=1;
+		    cellFlag[up(nlpos,lsx)].add=1;
+		    }
+		    s[down(ngpos,h)].up = 1;
+		    if(ly<(lsy-1)){
+		    rowFlag[ly+1].add=1;
+                    cellFlag[down(nlpos,lsx)].add=1;
+		    }
+		    s[left(ngpos,h)].right = 1;
+		    if(nlx>0){
+		    rowFlag[ly].add=1;
+                    cellFlag[left(nlpos,lsx)].add=1;
+		    }
+		    s[right(ngpos,h)].left = 1;
+		    if(nlx<(lsx-1)){
+		    rowFlag[ly].add=1;
+                    cellFlag[right(nlpos,lsx)].add=1;
+		    }
+		    s[ngpos].val -=4;
+     }
+     
+}
+void apply_add_update_ping(__global sand* s,int gpos, int ly, int lpos,__local container* rowFlag, __local container* cellFlag){
+     if(s[gpos].val >=0){
+     s[gpos].val = s[gpos].val + s[gpos].up + s[gpos].down + s[gpos].left + s[gpos].right;
+     s[gpos].up = 0;
+     s[gpos].down = 0;
+     s[gpos].left = 0;
+     s[gpos].right = 0;
+     }
+     if(s[gpos].val > 3){
+     		    rowFlag[ly].ping = 1;
+		    cellFlag[lpos].ping = 1;
+     }
+}
+void run_once(__global sand* s, int v, int h,__local container* rowFlag,__local container* cellFlag, int ly, int lsx, int lpos,int gpos){
+         for(int i = 0; i < lsx; i++){
+	 	 ping_update_add(s,gpos+i,lpos+i,ly,get_local_size(1),get_local_id(0)+i,lsx,rowFlag,cellFlag,h);
+	 }
+
+	 barrier(CLK_GLOBAL_MEM_FENCE);
+
+
+
+	 if(ly==0 || ly == (get_local_size(1)-1)){
+	     for(int j = 0; j < lsx; j++){
+                 apply_add_update_ping(s,gpos+j,ly,lpos+j,rowFlag,cellFlag);
+             }
+	 }
+	 else{
+
+	apply_add_update_ping(s,gpos,ly,lpos,rowFlag,cellFlag);
+	 if(check(rowFlag,cellFlag,ly,lpos,1,1)){
+          for(int i = 1; i < lsx; i++){
+             if(check(rowFlag,cellFlag,ly,lpos+i,0,1)){
+		 apply_add_update_ping(s,gpos+i,ly,lpos+i,rowFlag,cellFlag);
+             }
+          }
+         }
+	 apply_add_update_ping(s,gpos+(lsx-1),ly,lpos+(lsx-1),rowFlag,cellFlag);
+	 }
+
+
+
+	 barrier(CLK_GLOBAL_MEM_FENCE);
+	 
+}
+void run_multiple(__global sand* s,int v, int h,__local container* rowFlag,__local container* cellFlag, int ly, int lsx, int lpos, int gpos){
+     	if(check(rowFlag,cellFlag,ly,lpos,1,0)){
+		for(int i = 0; i < lsx; i++){
+			if(check(rowFlag,cellFlag,ly,lpos+i,0,0)){
+			ping_update_add(s,gpos+i,lpos+i,ly,get_local_size(1),get_local_id(0)+i,lsx,rowFlag,cellFlag,h);
+			}
+
+		}
+	}
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	if(check(rowFlag,cellFlag,ly,lpos,1,1)){
+          for(int i = 0; i < lsx; i++){
+             if(check(rowFlag,cellFlag,ly,lpos+i,0,1)){
+                 apply_add_update_ping(s,gpos+i,ly,lpos+i,rowFlag,cellFlag);
+             }
+          }
+         }
+
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	
+}     
+__kernel void run(__global sand *s, global container* rCtrl, global container* cCtrl, int v, int h,int lsy,int lsx,int flag){
+	 
+	 int lx = get_local_id(0);
+	 int ly = get_local_id(1);
+	 int nx = get_group_id(0);
+	 int ny = get_group_id(1);
+	 int nsx = get_num_groups(0);
+	 int nsy = get_num_groups(1);
+
+	 int lpos = pos(lx,ly,lsx);
+	 int gpos = pos(get_global_id(0),get_global_id(1),h);
+	 __local container rowFlag[512];
+	 __local container cellFlag[512];
+	 
+	 cellFlag[lpos].ping = cCtrl[gpos].ping;
+	 cellFlag[lpos].add = cCtrl[gpos].add;
+	
+	 	 	 
+         if(lx==0){
+	
+	 rowFlag[ly].ping = rCtrl[ny*nsy+nx*v+ly].ping;
+	 rowFlag[ly].add = rCtrl[ny*nsy+nx*v+ly].add;
+	 	 
+	 
+	 if(!flag){
+    	 run_once(s,v,h,&rowFlag,&cellFlag,ly,lsx,lpos,gpos);
+	 }
+	 else{
+	 run_multiple(s,v,h,&rowFlag,&cellFlag,ly,lsx,lpos,gpos);	
+	 }
+	 
+	
+         rCtrl[ny*nsy+nx*v+ly].ping = rowFlag[ly].ping;
+         rCtrl[ny*nsy+nx*v+ly].add  = rowFlag[ly].add;
+         cCtrl[gpos].ping = cellFlag[lpos].ping;
+	 cCtrl[gpos].add = cellFlag[lpos].add;
+	 }
+	 s[gpos].val=gpos;
+	 
+	 
+}
+
+		

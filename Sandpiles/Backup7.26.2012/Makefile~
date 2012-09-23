@@ -1,0 +1,45 @@
+TARGET = run
+
+OS_NAME 		:= $(shell uname -s)
+
+ifeq ($(OS_NAME),Darwin)
+	DEFINES		+= -DDARWIN -D__APPLE__ -D__apple__
+	INCLUDE		+= -I. -I/usr/include -I/System/Library/Frameworks/OpenCL.framework/Headers -I.
+	LIBRARIES 	+= -framework OpenCL -framework AppKit -framework Foundation
+endif
+
+ifeq ($(OS_NAME),Linux)
+	DEFINES		+= -DLINUX -D__LINUX__ -D__linux__
+	INCLUDE		+= -I. -I/usr/include -I/usr/local/include -I/usr/local/cuda/include
+	LIBPATH 	+= -L. -L/usr/lib -L/usr/local/cuda/lib -L/usr/local/cuda/lib64
+	LIBRARIES 	+= -lOpenCL
+endif
+
+OBJDIR 			= .
+OBJECTS                 = $(TARGET).o reedGPU.o
+
+RM				= rm
+CC 				= g++
+WARN 			= -Wall
+CFLAGS 			= -c -g -O3 $(INCLUDE) $(WARN)
+
+
+$(TARGET): $(OBJECTS)
+	@echo $(OBJECTS)
+	@echo "Linking '$@'"
+	$(CC) $(OBJECTS) -o $@ $(LIBPATH) $(LIBRARIES)
+
+$(OBJDIR)/%.o: %.cpp
+	@echo "Building '$@'"
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+$(OBJDIR)/%.o: %.c
+	@echo "Building '$@'"
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+clean:
+	@echo "Cleaning '$@'"
+	$(RM) -f $(TARGET) $(OBJECTS)
+
+.DEFAULT:
+	@echo The target \"$@\" does not exist in this Makefile.

@@ -1,0 +1,78 @@
+typedef struct {
+       __private int* pq;
+       __private int index;
+} container;
+
+typedef struct {
+	int up;
+	int down;
+	int right;
+	int left;
+	int val;
+	int queued;
+} sand;
+
+int pos(int i, int j, int h){
+    return(i+ j*h);
+    
+}
+int up(int p, int v){
+    int s = p - v;
+    return(s);
+}
+int down(int p, int v){
+    int s = p +v;
+    return(s);
+}
+int left(int p, int v){
+    int s = p - 1;
+ return(s);
+}
+int right(int p, int v){
+    int s = p + 1;
+    return(s);
+}
+
+void queue(container* data, __global sand *src, int gpos){
+     if(src[gpos].queued == 0 && data->index < 32){
+     	src[gpos].queued = 1;
+	data->pq[data->index]=gpos;
+	data->index ++;
+}
+}
+
+void rect_helper(__global sand *src, __global sand *dst, int v, int h, container* data){
+ 	 int gx = get_global_id(0);
+	 int gy = get_global_id(1);
+	 int gpos = pos(gx,gy,h);
+	 if(src[gpos].val>=4){
+		dst[gpos].val = src[gpos].val - 4;
+           	src[up(gpos,v)].down = 1;
+		queue(data,src,up(gpos,v));				
+		src[down(gpos,v)].up = 1;
+		 queue(data,src,down(gpos,v)); 
+		src[left(gpos,v)].right = 1;
+		 queue(data,src,left(gpos,v));
+		src[right(gpos,v)].left = 1;
+		 queue(data,src,right(gpos,v));
+	}
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	int loc = 0;
+	for(int i =0; i < data->index; i++){
+	loc = data->pq[i];
+	dst[loc].val += (src[loc].up + src[loc].down + src[loc].right + src[loc].left);
+
+
+}
+}
+__kernel void run(__global sand *s, __global sand *d, int v, int h){
+	 static int pq[32]; 
+	 __private container data;
+	 data.index = 0;
+	 data.pq = pq;
+	 
+	 rect_helper(s,d,v,h,&data);
+	 
+	 
+}
+		
