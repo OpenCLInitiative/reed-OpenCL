@@ -2,7 +2,7 @@
 
 int main{int argc, char** argv){
 
-printf("Sup");
+printf("Sup foo");
 return(1);
 
 }
