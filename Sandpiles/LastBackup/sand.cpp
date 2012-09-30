@@ -1,7 +1,7 @@
 #include <CL/cl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#define PPM_RES 30
+#include "clUtils.h"
 
 typedef struct{
   int up;
@@ -15,272 +15,27 @@ typedef struct{
   int ping;
   int add;
 }container;
-const char* cSourceFile = "sand.cl";
+const char* SourceFile = "sand.cl";
 
-char cBuildLog[10240];
-size_t cBuildLogSz;
+char BuildLog[10240];
+size_t BuildLogSz;
 
 // OpenCL Vars
-cl_context cxGPUContext;        // OpenCL context
-cl_command_queue cqCommandQueue;// OpenCL command que
-cl_platform_id cpPlatform;      // OpenCL platform
-cl_device_id cdDevice;          // OpenCL device
-cl_program cpProgram;           // OpenCL program
-cl_kernel ckKernel;             // OpenCL kernel
-cl_mem cmDevSrc;               // OpenCL device source buffer A
-cl_mem cmDevRowCtrl;
-cl_mem cmDevCellCtrl;
-size_t szKernelLength;			// Byte size of kernel code
-cl_int ciErr, ciErr2;			// Error code var
-char* cPathAndName = NULL;      // var for full paths to data, src, etc.
-char* cSourceCL = NULL;         // Buffer to hold source for compilation 
+cl_context context;        // OpenCL context
+cl_command_queue commands;// OpenCL command que
+cl_platform_id platform;      // OpenCL platform
+cl_device_id device;          // OpenCL device
+cl_program program;           // OpenCL program
+cl_kernel kernel;             // OpenCL kernel
+cl_mem devSrc;               // OpenCL device source buffer A
+cl_mem devRowCtrl;
+cl_mem devCellCtrl;
+size_t kernelLength;			// Byte size of kernel code
+cl_int err1, err2;			// Error code var
+char* pathAndName = NULL;      // var for full paths to data, src, etc.
+char* SourceCL = NULL;         // Buffer to hold source for compilation 
 cl_event event;
 cl_ulong time;
-
-const char* errorString(cl_int error)
-{
-    static const char* errorString[] = {
-        "CL_SUCCESS",
-        "CL_DEVICE_NOT_FOUND",
-        "CL_DEVICE_NOT_AVAILABLE",
-        "CL_COMPILER_NOT_AVAILABLE",
-        "CL_MEM_OBJECT_ALLOCATION_FAILURE",
-        "CL_OUT_OF_RESOURCES",
-        "CL_OUT_OF_HOST_MEMORY",
-        "CL_PROFILING_INFO_NOT_AVAILABLE",
-        "CL_MEM_COPY_OVERLAP",
-        "CL_IMAGE_FORMAT_MISMATCH",
-        "CL_IMAGE_FORMAT_NOT_SUPPORTED",
-        "CL_BUILD_PROGRAM_FAILURE",
-        "CL_MAP_FAILURE",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "CL_INVALID_VALUE",
-        "CL_INVALID_DEVICE_TYPE",
-        "CL_INVALID_PLATFORM",
-        "CL_INVALID_DEVICE",
-        "CL_INVALID_CONTEXT",
-        "CL_INVALID_QUEUE_PROPERTIES",
-        "CL_INVALID_COMMAND_QUEUE",
-        "CL_INVALID_HOST_PTR",
-        "CL_INVALID_MEM_OBJECT",
-        "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
-        "CL_INVALID_IMAGE_SIZE",
-        "CL_INVALID_SAMPLER",
-        "CL_INVALID_BINARY",
-        "CL_INVALID_BUILD_OPTIONS",
-        "CL_INVALID_PROGRAM",
-        "CL_INVALID_PROGRAM_EXECUTABLE",
-        "CL_INVALID_KERNEL_NAME",
-        "CL_INVALID_KERNEL_DEFINITION",
-        "CL_INVALID_KERNEL",
-        "CL_INVALID_ARG_INDEX",
-        "CL_INVALID_ARG_VALUE",
-        "CL_INVALID_ARG_SIZE",
-        "CL_INVALID_KERNEL_ARGS",
-        "CL_INVALID_WORK_DIMENSION",
-        "CL_INVALID_WORK_GROUP_SIZE",
-        "CL_INVALID_WORK_ITEM_SIZE",
-        "CL_INVALID_GLOBAL_OFFSET",
-        "CL_INVALID_EVENT_WAIT_LIST",
-        "CL_INVALID_EVENT",
-        "CL_INVALID_OPERATION",
-        "CL_INVALID_GL_OBJECT",
-        "CL_INVALID_BUFFER_SIZE",
-        "CL_INVALID_MIP_LEVEL",
-        "CL_INVALID_GLOBAL_WORK_SIZE",
-    };
-
-    const int errorCount = sizeof(errorString) / sizeof(errorString[0]);
-
-    const int index = -error;
-
-    return (index >= 0 && index < errorCount) ? errorString[index] : "Unspecified Error";
-}
-
-void err(const char *msg, int code, int line) {
-  if (code) {
-    printf("Error %s(%d) in line %d: %s\n", errorString(code), code, line, msg);
-    exit(0);
-  }
-}
-
-#define ERR(m) err((m),ciErr,__LINE__)
-
-char* loadProgSource(const char* filename, size_t* length)
-{
-    FILE* f = NULL;
-    int len;
-
-    // open the OpenCL source code file
-    #ifdef _WIN32   // Windows version
-        if(fopen_s(&f, filename, "rb") != 0) 
-        {       
-            return NULL;
-        }
-    #else           // Linux version
-        f = fopen(filename, "rb");
-        if(f == 0) 
-        {       
-            return NULL;
-        }
-    #endif
-
-    // get the length of the source code
-    fseek(f, 0, SEEK_END); 
-    len = ftell(f);
-    fseek(f, 0, SEEK_SET); 
-
-    // allocate a buffer for the source code string and read it in
-    char* src = (char *)malloc(len + 1); 
-    if (fread(src, len, 1, f) != 1) {
-      fclose(f);
-      free(src);
-      return NULL;
-    } else {
-      fclose(f);
-      if (length != NULL) *length = len;
-      src[len] = '\0';
-      return src;
-    }
-}
-
-int* file_extractor(char *file_name, int &h, int &v){
-  FILE *file;
-  file = fopen(file_name, "r");
-  int z = 0;
-  int x;
-  fscanf(file, "%d", &h);
-  fscanf(file, "%d", &v);
-  int m = h*v;
-  h += 2;
-  v += 2;
-  int n = h*v;
-  int* s = (int*)malloc(n*sizeof(int));
-  for(int i =0;i<=n;i++){
-
-    fscanf(file, "%d", &x);
-    s[i] = x;
-  }
-  fclose(file);
-  return(s);
-
-}
-char* rgbDet(int s, int res){
-    int r, g, b;
-    b = s%res;
-    s /= res;
-    g = s%res;
-    s /= res;
-    r = s%res;
-    char* fs =(char*)malloc(32*sizeof(char));
-    sprintf(fs, "%d %d %d   ",r,g,b);
-    return(fs);
-  
-}
-void ppm(sand* src, int h, int v, int n, int r, char* s){
-    FILE* fp;
-    char* fn = (char*)malloc(500);
-    int res = PPM_RES;
-    sprintf(fn,"/home/gpu/vgopalas/sand3/PPMOut/%s%03d.ppm",s,r);
-    fp = fopen(fn, "w");
-    if(fp ==NULL){
-      printf("failure\n");
-      exit(0);
-    }
-    fprintf(fp,"P3\n%d %d\n%d",h,v, res);
-    for(int i =0;i<n;i++){
-      char* fsn =(char*)malloc(30*sizeof(char));
-      if(i%60 == 0){
-	fprintf(fp,"\n");
-      }
-      if(src[i].val==0){
-	fprintf(fp,"0 0 0   ");
-      }
-      else{ if(src[i].val==1){
-	  sprintf(fsn,"%d 0 0   ",res);
-	  fprintf(fp,fsn);
-	}
-	else{ if(src[i].val==2){
-	    sprintf(fsn,"0 %d 0   ",res);
-	    fprintf(fp,fsn);
-	  }
-	  else{ if(src[i].val==3){
-	      sprintf(fsn,"0 0 %d   ",res);
-
-	      fprintf(fp, fsn);
-	    }
-	    else{
-	      if(src[i].val < 0){
-		sprintf(fsn,"%d %d %d   ",res, res, res);
-
-		fprintf(fp,fsn);
-	      }
-	      else{ char * fs = rgbDet(src[i].val,res);
-		fprintf(fp,fs);
-	      }
-	    }
-	  }
-
-	}}}
-    fclose(fp);
-}
-
-void eventprofiler(cl_event event, int* s, int* e){
-    clGetEventProfilingInfo (event, CL_PROFILING_COMMAND_START,
-                             sizeof(cl_ulong),
-			     s,
-                             NULL);
-    clGetEventProfilingInfo (event, CL_PROFILING_COMMAND_END,
-                             sizeof(cl_ulong),
-                             e,
-                             NULL);
-}
-void printSand(sand* src, int len, int h){
-  for(int i = 0; i < len; i++){
-    if(i%h ==0){
-      printf("\n");
-    }
-
-    printf("%3d ",(src[i].val));
-  }
-  printf("\n");
-}
-void printPing(container* src, int len, int h){
-  for(int i = 0; i < len; i++){
-    if(i%h ==0){
-      printf("\n");
-    }
-
-    printf("%3d ",(src[i].ping));
-  }
-  printf("\n");
-}
-void printRow(container* src, int len, int h){
-  for(int i = 0; i < len; i++){
-    if(i%h ==0){
-      printf("\n");
-    }
-
-    printf("%3d ",(src[i].ping));
-  }
-  printf("\n");
-}
 
 int main(int argc, char **argv)
 {
@@ -339,42 +94,42 @@ int main(int argc, char **argv)
   }
   size_t* wisizes = (size_t*)malloc(3*sizeof(size_t));
   //////// INIT DEVICE
-  ciErr = clGetPlatformIDs(1, &cpPlatform, NULL);
+  err1 = clGetPlatformIDs(1, &platform, NULL);
   ERR("platform");
-  ciErr = clGetDeviceIDs(cpPlatform, CL_DEVICE_TYPE_GPU, 1, &cdDevice, NULL);
+  err1 = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
   ERR("device IDs");
-  clGetDeviceInfo(cdDevice,CL_DEVICE_MAX_COMPUTE_UNITS,sizeof(numComputeUnits),(void *)&numComputeUnits,NULL);
+  clGetDeviceInfo(device,CL_DEVICE_MAX_COMPUTE_UNITS,sizeof(numComputeUnits),(void *)&numComputeUnits,NULL);
   printf("Compute units:\t%d\n",(int)numComputeUnits);
-  clGetDeviceInfo(cdDevice,CL_DEVICE_MAX_WORK_ITEM_SIZES,sizeof(wisizes),(void *)&wisizes,NULL);
+  clGetDeviceInfo(device,CL_DEVICE_MAX_WORK_ITEM_SIZES,sizeof(wisizes),(void *)&wisizes,NULL);
 
-  cxGPUContext = clCreateContext(0, 1, &cdDevice, NULL, NULL, &ciErr);
+  context = clCreateContext(0, 1, &device, NULL, NULL, &err1);
   ERR("context");
-  cqCommandQueue = clCreateCommandQueue(cxGPUContext, cdDevice, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &ciErr);
+  commands = clCreateCommandQueue(context, device, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &err1);
   ERR("command queue");
 
    
 
   //////// INIT DEVICE MEMORY
-  cmDevSrc = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(sand) * graph_n, NULL, &ciErr);
-  cmDevRowCtrl = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(container) * graph_v*(graph_h/lsx), NULL, &ciErr2);
-  cmDevCellCtrl = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(container)*graph_n,NULL, &ciErr2);
-  ciErr |= ciErr2;
+  devSrc = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(sand) * graph_n, NULL, &err1);
+  devRowCtrl = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(container) * graph_v*(graph_h/lsx), NULL, &err2);
+  devCellCtrl = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(container)*graph_n,NULL, &err2);
+  err1 |= err2;
   ERR("gpu buffers");
 
   //////// COMPILE AND INSTALL KERNEL CODE
-  cSourceCL = loadProgSource(cSourceFile, &szKernelLength);
-  cpProgram = clCreateProgramWithSource(cxGPUContext, 1, (const char **)&cSourceCL, &szKernelLength, &ciErr);
+  SourceCL = loadProgSource(cSourceFile, &kernelLength);
+  program = clCreateProgramWithSource(context, 1, (const char **)&SourceCL, &kernelLength, &err1);
   ERR("create from source");
-  ciErr = clBuildProgram(cpProgram, 0, NULL, NULL, NULL, NULL);
+  err1 = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
 
-  clGetProgramBuildInfo(cpProgram,cdDevice,CL_PROGRAM_BUILD_LOG,sizeof(cBuildLog),cBuildLog,&cBuildLogSz);
+  clGetProgramBuildInfo(program,device,CL_PROGRAM_BUILD_LOG,sizeof(cBuildLog),cBuildLog,&cBuildLogSz);
   printf("--------\n\n");
   printf("Here are the build errors (if any)...\n");
   printf("%s",cBuildLog);
   printf("--------\n\n");
 
 
-  kernel = clCreateKernel(cpProgram, "run", &ciErr);
+  kernel = clCreateKernel(program, "run", &err1);
   ERR("kernel");
 
 
@@ -384,54 +139,50 @@ int main(int argc, char **argv)
   for(int j = 0; j<runs; j++){
     
     if(flag){
-    ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDevSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 1, &event[6],&event[index]);
+    err1 = clEnqueueWriteBuffer(commands, devSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 1, &event[6],&event[index]);
     ERR("write buffer");
     index++;
     }
-    else{ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDevSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 0,NULL,&event[index]);
+    else{err1 = clEnqueueWriteBuffer(commands, devSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 0,NULL,&event[index]);
       ERR("write buffer");
       index ++;
     }
-    ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDevRowCtrl, CL_TRUE, 0, sizeof(container)* graph_v*(graph_h/lsx), RowCtrl, 1, &event[index-1],&event[index]);
+    err1 = clEnqueueWriteBuffer(commands, devRowCtrl, CL_TRUE, 0, sizeof(container)* graph_v*(graph_h/lsx), RowCtrl, 1, &event[index-1],&event[index]);
     index++;
       ERR("write buffer");
-      ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDevCellCtrl, CL_TRUE, 0, sizeof(container)*graph_n, CellCtrl, 1,&event[index-1],&event[index]);
+      err1 = clEnqueueWriteBuffer(commands, devCellCtrl, CL_TRUE, 0, sizeof(container)*graph_n, CellCtrl, 1,&event[index-1],&event[index]);
       index++;
     ERR("write buffer");
 
 
 
-    clFinish(cqCommandQueue);
+    clFinish(commands);
 
     //    ppm(src,graph_h,graph_v,graph_n,j,argv[0]);
 
-    clSetKernelArg(kernel, 0, sizeof(cl_mem), &cmDevSrc);
-    clSetKernelArg(kernel, 1, sizeof(cl_mem), &cmDevRowCtrl);
-    clSetKernelArg(kernel, 2, sizeof(cl_mem), &cmDevCellCtrl);
+    clSetKernelArg(kernel, 0, sizeof(cl_mem), &devSrc);
+    clSetKernelArg(kernel, 1, sizeof(cl_mem), &devRowCtrl);
+    clSetKernelArg(kernel, 2, sizeof(cl_mem), &devCellCtrl);
     clSetKernelArg(kernel, 3, sizeof(int),  &graph_h);
     clSetKernelArg(kernel, 4, sizeof(int),  &graph_v);
     clSetKernelArg(kernel, 5, sizeof(int),  &lsy);
     clSetKernelArg(kernel, 6, sizeof(int),  &lsx);
     clSetKernelArg(kernel, 7, sizeof(int), &flag);
 
-    clEnqueueNDRangeKernel(cqCommandQueue,kernel,2,NULL,global,local, 1, &event[index-1],&event[index]);
+    clEnqueueNDRangeKernel(commands,kernel,2,NULL,global,local, 1, &event[index-1],&event[index]);
     index++;
-    clFinish(cqCommandQueue);
-    clEnqueueReadBuffer(cqCommandQueue, cmDevSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 1,&event[index-1],&event[index]);
+    clFinish(commands);
+    clEnqueueReadBuffer(commands, devSrc, CL_TRUE, 0, sizeof(sand)*graph_n, src, 1,&event[index-1],&event[index]);
     index++;
-    clEnqueueReadBuffer(cqCommandQueue, cmDevRowCtrl, CL_TRUE, 0, sizeof(container)* graph_v*(graph_h/lsx), RowCtrl, 1,&event[index-1],&event[index]);
+    clEnqueueReadBuffer(commands, devRowCtrl, CL_TRUE, 0, sizeof(container)* graph_v*(graph_h/lsx), RowCtrl, 1,&event[index-1],&event[index]);
     index++;
-    clEnqueueReadBuffer(cqCommandQueue, cmDevCellCtrl, CL_TRUE, 0, sizeof(container)*graph_n, CellCtrl, 1,&event[index-1],&event[index]);
+    clEnqueueReadBuffer(commands, devCellCtrl, CL_TRUE, 0, sizeof(container)*graph_n, CellCtrl, 1,&event[index-1],&event[index]);
     index++;
 
-    clFinish(cqCommandQueue);
+    clFinish(commands);
     for(int i = 0; i < 7; i++){
     eventprofiler(event[i],&start,&end);
     time += (end-start);
-    }
-    if(print){
-      printSand(src,graph_n,graph_h);
-      printPing(CellCtrl,graph_n,graph_h);
     }
     index = 0;
     flag = 1;
