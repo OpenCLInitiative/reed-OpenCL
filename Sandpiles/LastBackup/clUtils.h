@@ -7,6 +7,7 @@
 const char* CLErrorString(cl_int error);
 void err(const char *msg, int code, int line);
 void eventprofiler(cl_event event, int* s, int* e);
-int* file_extractor(char *file_name, int* h, int* v)
+int* file_extractor(char *file_name, int* h, int* v);
+struct clVars;
 
 #endif

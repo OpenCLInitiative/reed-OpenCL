@@ -6,10 +6,10 @@
 
 cl_int Err;
 
-#define ERR(m) err((m),Err,__LINE__)
+#define ERR(m) cluErr((m),Err,__LINE__)
 
 // Outputs more detailed error messages
-const char* CLErrorString(cl_int error)
+const char* cluErrorString(cl_int error)
 {
     static const char* errorString[] = {
         "CL_SUCCESS",
@@ -82,15 +82,15 @@ const char* CLErrorString(cl_int error)
     return (index >= 0 && index < errorCount) ? errorString[index] : "Unspecified Error";
 }
 
-void err(const char *msg, int code, int line) {
+void cluErr(const char *msg, int code, int line) {
   if (code) {
-    printf("Error %s(%d) in line %d: %s\n", _CLErrorstring(code), code, line, msg);
+    printf("Error %s(%d) in line %d: %s\n", _cluErrorString(code), code, line, msg);
     exit(0);
   }
 }
 
 // Gives the start and end times of some event
-void eventprofiler(cl_event event, int* s, int* e){
+void cluEventProfiler(cl_event event, int* s, int* e){
     clGetEventProfilingInfo (event, CL_PROFILING_COMMAND_START,
                              sizeof(cl_ulong),
 			     s,
@@ -102,16 +102,13 @@ void eventprofiler(cl_event event, int* s, int* e){
 }
 
 // Reads the contents of a .cl source file into a buffer to be compiled by the OpenCL API
-int* file_extractor(char *file_name, int* h, int* v){
+int* cluFileExtractor(char *file_name){
   FILE *file;
   int sz = (int)fsize(file_name);
   int* s = (int*)malloc(sz*sizeof(int));
   file = fopen(file_name, "r");
   int z = 0;
-  int x;
-  fscanf(file, "%d", h);
-  fscanf(file, "%d", v);
-  
+  int x;  
   while(fscanf(file,"%d",&x) != EOF){
     s[z]=x;
     z++;
@@ -120,4 +117,22 @@ int* file_extractor(char *file_name, int* h, int* v){
   fclose(file);
   return(s);
 
+}
+
+struct cluVars{
+cl_context context;        // OpenCL context
+cl_command_queue commands;// OpenCL command que
+cl_platform_id platform;      // OpenCL platform
+cl_device_id device;          // OpenCL device
+cl_program program;           // OpenCL program
+cl_kernel kernel;             // OpenCL kernel
+cl_mem devSrc;               // OpenCL device source buffer A
+cl_mem devRowCtrl;
+cl_mem devCellCtrl;
+size_t kernelLength;			// Byte size of kernel code
+cl_int err1, err2;			// Error code var
+char* pathAndName;      // var for full paths to data, src, etc.
+char* SourceCL;         // Buffer to hold source for compilation 
+cl_event event;
+cl_ulong time;
 }
